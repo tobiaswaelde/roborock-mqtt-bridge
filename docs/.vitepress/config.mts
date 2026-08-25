@@ -1,11 +1,13 @@
 import { defineConfig } from 'vitepress';
 export default defineConfig({
-  title: 'Roborock Mqtt Bridge',
-  description: 'MQTT bridge documentation',
+  title: 'Roborock MQTT Bridge',
+  description: 'Reliable MQTT integration for Roborock vacuum accounts.',
   base: '/roborock-mqtt-bridge/',
   cleanUrls: true,
   lastUpdated: true,
+  head: [['link', { rel: 'icon', href: '/roborock-mqtt-bridge/favicon.svg', type: 'image/svg+xml' }]],
   themeConfig: {
+    logo: '/logo.svg',
     nav: [
       { text: 'Guide', link: '/' },
       { text: 'Configuration', link: '/configuration' },

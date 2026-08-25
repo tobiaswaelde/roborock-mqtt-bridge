@@ -7,6 +7,7 @@ import { HttpMqttBridge } from '~/lib/http-mqtt-bridge';
 import type { MqttBridgeClient } from '~/modules/mqtt/mqtt.service';
 import { RoborockConfig, RoborockLogLevel } from '~/types/config/roborock';
 import { objectToMap } from '~/util/object';
+import { asRecord, redact } from './data';
 import {
   COMMANDS,
   REGION_HOSTS,
@@ -31,15 +32,15 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   private destroyed = false;
 
   /** Creates a bridge instance for one Roborock account.
-   * @param cfg - Value of type `{ id: string; enabled: boolean; topic: string; email: string; region: "auto" | "eu" | "us" | "cn"; logLevel: "error" | "warn" | "debug" | "info"; updateInterval: number; authFile?: string | undefined; baseUrl?: string | undefined; password?: string | undefined; session?: Record<...> | undefined; verificationCode?: s...`.
-   * @param mqtt - Value of type `MqttBridgeClient`.
+   * @param {RoborockConfig} cfg Roborock account configuration.
+   * @param {MqttBridgeClient} mqtt MQTT client.
    */
   constructor(cfg: RoborockConfig, mqtt: MqttBridgeClient) {
     super(cfg, mqtt, `ROBOROCK@${cfg.topic}`, '');
   }
 
   /** Subscribes to MQTT commands and begins account authentication.
-   * @returns Result of type `void`.
+   * @returns {void} Result.
    */
   public setup() {
     this.setConnected(false);
@@ -49,7 +50,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Stops active work, disconnects the wrapped client, and publishes offline state.
-   * @returns Result of type `void`.
+   * @returns {void} Result.
    */
   public override destroy() {
     if (this.destroyed) return;
@@ -64,7 +65,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Discovers the account region, restores a saved session, and starts the client.
-   * @returns Result of type `Promise<void>`.
+   * @returns {Promise<void>} Result.
    */
   private async connect() {
     const baseURL = await this.getBaseUrl();
@@ -102,7 +103,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Resolves the cloud host explicitly configured for the account or discovers it by e-mail.
-   * @returns Result of type `Promise<string | undefined>`.
+   * @returns {Promise<string | undefined>} Result.
    */
   private async getBaseUrl() {
     if (this.cfg.baseUrl) return this.normalizeHost(this.cfg.baseUrl);
@@ -128,16 +129,16 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Removes protocol and trailing slash so the wrapped client receives only a host name.
-   * @param url - Value of type `string`.
-   * @returns Result of type `string`.
+   * @param {string} url The url value.
+   * @returns {string} Result.
    */
   private normalizeHost(url: string) {
     return url.replace(/^https?:\/\//, '').replace(/\/+$/, '');
   }
 
   /** Keeps device data in memory and persists only the authentication session to the configured local file.
-   * @param client - Value of type `RoborockClient`.
-   * @returns Result of type `void`.
+   * @param {RoborockClient} client The client value.
+   * @returns {void} Result.
    */
   private useMemoryOnlyState(client: RoborockClient) {
     client.setStateAsync = async (id: string, state: RoborockState) => {
@@ -148,7 +149,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Builds the local path used exclusively for the authentication session.
-   * @returns Result of type `string`.
+   * @returns {string} Result.
    */
   private get authenticationFile() {
     const topicHash = createHash('sha256').update(this.cfg.topic).digest('hex').slice(0, 12);
@@ -157,11 +158,11 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Loads and validates a previously persisted authentication session, if one exists.
-   * @returns Result of type `Promise<RoborockSession | undefined>`.
+   * @returns {Promise<RoborockSession | undefined>} Result.
    */
   private async loadAuthentication(): Promise<RoborockSession | undefined> {
     try {
-      const session = this.asRecord(JSON.parse(await readFile(this.authenticationFile, 'utf8')));
+      const session = asRecord(JSON.parse(await readFile(this.authenticationFile, 'utf8')));
       if (!this.isAuthenticationSession(session)) {
         throw new Error('Authentication file does not contain a valid session.');
       }
@@ -177,11 +178,11 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Atomically stores a valid cloud session with owner-only file permissions.
-   * @param value - Value of type `unknown`.
-   * @returns Result of type `Promise<void>`.
+   * @param {unknown} value The value value.
+   * @returns {Promise<void>} Result.
    */
   private async persistAuthentication(value: unknown) {
-    const session = this.asRecord(this.parseJson(value));
+    const session = asRecord(this.parseJson(value));
     if (!this.isAuthenticationSession(session)) return;
 
     const file = this.authenticationFile;
@@ -198,16 +199,16 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Checks that a decoded value has the fields required by the wrapped client.
-   * @param session - Value of type `Record<string, unknown> | undefined`.
-   * @returns Result of type `boolean`.
+   * @param {Record<string, unknown> | undefined} session The session value.
+   * @returns {boolean} Result.
    */
   private isAuthenticationSession(session: Record<string, unknown> | undefined): session is RoborockSession {
-    return typeof session?.token === 'string' && this.asRecord(session.rriot) !== undefined;
+    return typeof session?.token === 'string' && asRecord(session.rriot) !== undefined;
   }
 
   /** Marks the MQTT bridge connected and publishes the discovered device metadata.
-   * @param client - Value of type `RoborockClient`.
-   * @returns Result of type `void`.
+   * @param {RoborockClient} client The client value.
+   * @returns {void} Result.
    */
   private handleConnected(client: RoborockClient) {
     if (this.destroyed || client !== this.client) return;
@@ -217,40 +218,40 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Converts a cloud or local client notification into redacted MQTT publications.
-   * @param client - Value of type `RoborockClient`.
-   * @param event - Value of type `string`.
-   * @param state - Value of type `unknown`.
-   * @returns Result of type `void`.
+   * @param {RoborockClient} client The client value.
+   * @param {string} event The event value.
+   * @param {unknown} state The state value.
+   * @returns {void} Result.
    */
   private handleClientEvent(client: RoborockClient, event: string, state: unknown) {
     if (this.destroyed || client !== this.client) return;
 
     if (event === 'HomeData') {
-      const record = this.asRecord(state);
+      const record = asRecord(state);
       this.publishHomeData(record?.val);
       return;
     }
 
-    const record = this.asRecord(state);
+    const record = asRecord(state);
     const deviceId = typeof record?.duid === 'string' ? record.duid : undefined;
     const payload = record?.payload ?? record;
-    const safePayload = this.redact(payload);
+    const safePayload = redact(payload);
     const prefix = deviceId ? `${this.cfg.topic}/devices/${deviceId}` : `${this.cfg.topic}/events/${event}`;
     this.publishJson(`${prefix}/json`, safePayload);
     this.publishData(prefix, safePayload);
   }
 
   /** Publishes non-sensitive device metadata from the Roborock home-data response.
-   * @param value - Value of type `unknown`.
-   * @returns Result of type `void`.
+   * @param {unknown} value The value value.
+   * @returns {void} Result.
    */
   private publishHomeData(value: unknown) {
     const data = this.parseJson(value);
-    const devices = this.asRecord(data)?.devices;
+    const devices = asRecord(data)?.devices;
     if (!Array.isArray(devices)) return;
 
     for (const value of devices) {
-      const device = this.asRecord(value) as RoborockDevice | undefined;
+      const device = asRecord(value) as RoborockDevice | undefined;
       if (!device?.duid) continue;
 
       const info = {
@@ -264,7 +265,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Subscribes to the allowlisted vacuum command topic.
-   * @returns Result of type `void`.
+   * @returns {void} Result.
    */
   private subscribeCommands() {
     const topic = `${this.cfg.topic}/set/json`;
@@ -282,7 +283,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Subscribes to one-time-code request and verification topics.
-   * @returns Result of type `void`.
+   * @returns {void} Result.
    */
   private subscribeAuthentication() {
     const requestTopic = `${this.cfg.topic}/auth/request`;
@@ -304,8 +305,8 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Requests a Roborock e-mail verification code for the pending client session.
-   * @param client - Value of type `RoborockClient`.
-   * @returns Result of type `Promise<void>`.
+   * @param {RoborockClient} client The client value.
+   * @returns {Promise<void>} Result.
    */
   private async requestTwoFactorCode(client: RoborockClient) {
     try {
@@ -319,9 +320,9 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Verifies a one-time code and resumes the existing client setup.
-   * @param client - Value of type `RoborockClient`.
-   * @param code - Value of type `string`.
-   * @returns Result of type `Promise<void>`.
+   * @param {RoborockClient} client The client value.
+   * @param {string} code The code value.
+   * @returns {Promise<void>} Result.
    */
   private async verifyTwoFactorCode(client: RoborockClient, code: string) {
     try {
@@ -335,8 +336,8 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Invokes one allowlisted vacuum command when the account is ready.
-   * @param command - Value of type `RoborockCommand`.
-   * @returns Result of type `Promise<void>`.
+   * @param {RoborockCommand} command The command value.
+   * @returns {Promise<void>} Result.
    */
   private async executeCommand(command: RoborockCommand) {
     const client = this.client;
@@ -353,25 +354,25 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Publishes the bridge connection state.
-   * @param connected - Value of type `boolean`.
-   * @returns Result of type `void`.
+   * @param {boolean} connected The connected value.
+   * @returns {void} Result.
    */
   private setConnected(connected: boolean) {
     this.mqtt.publish(`${this.cfg.topic}/connected`, connected);
   }
 
   /** Publishes the current one-time-code authentication state.
-   * @param status - Value of type `RoborockAuthenticationStatus`.
-   * @returns Result of type `void`.
+   * @param {RoborockAuthenticationStatus} status The status value.
+   * @returns {void} Result.
    */
   private setAuthenticationStatus(status: RoborockAuthenticationStatus) {
     this.mqtt.publish(`${this.cfg.topic}/auth/status`, status);
   }
 
   /** Flattens a structured, non-sensitive payload into MQTT scalar topics.
-   * @param topic - Value of type `string`.
-   * @param data - Value of type `unknown`.
-   * @returns Result of type `void`.
+   * @param {string} topic The topic value.
+   * @param {unknown} data The data value.
+   * @returns {void} Result.
    */
   private publishData(topic: string, data: unknown) {
     if (!data || typeof data !== 'object') return;
@@ -382,9 +383,9 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Publishes a structured, non-sensitive payload as JSON.
-   * @param topic - Value of type `string`.
-   * @param data - Value of type `unknown`.
-   * @returns Result of type `void`.
+   * @param {string} topic The topic value.
+   * @param {unknown} data The data value.
+   * @returns {void} Result.
    */
   private publishJson(topic: string, data: unknown) {
     try {
@@ -395,8 +396,8 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Parses a client JSON value without allowing malformed data to interrupt the bridge.
-   * @param value - Value of type `unknown`.
-   * @returns Result of type `unknown`.
+   * @param {unknown} value The value value.
+   * @returns {unknown} Result.
    */
   private parseJson(value: unknown) {
     if (typeof value !== 'string') return value;
@@ -408,31 +409,8 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
     }
   }
 
-  /** Narrows a runtime value to a plain record.
-   * @param value - Value of type `unknown`.
-   * @returns Result of type `Record<string, unknown> | undefined`.
-   */
-  private asRecord(value: unknown): Record<string, unknown> | undefined {
-    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
-  }
-
-  /** Removes sensitive cloud and local credentials before publication.
-   * @param value - Value of type `unknown`.
-   * @returns Result of type `unknown`.
-   */
-  private redact(value: unknown): unknown {
-    if (Array.isArray(value)) return value.map((entry) => this.redact(entry));
-    if (!value || typeof value !== 'object') return value;
-
-    return Object.fromEntries(
-      Object.entries(value).flatMap(([key, entry]) =>
-        /(?:localkey|password|secret|token|rriot)/i.test(key) ? [] : [[key, this.redact(entry)]],
-      ),
-    );
-  }
-
   /** Emits a client log only when it is enabled by the configured Roborock log level.
-   * @returns Result of type `{ debug: (message: unknown) => void; error: (message: unknown) => void; info: (message: unknown) => void; warn: (message: unknown) => void; }`.
+   * @returns {{ debug: (message: unknown) => void; error: (message: unknown) => void; info: (message: unknown) => void; warn: (message: unknown) => void; }} Result.
    */
   private get clientLogger() {
     return {
@@ -444,9 +422,9 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Forwards a wrapped-client message to Nest only if its severity passes the configured threshold.
-   * @param level - Value of type `"error" | "warn" | "debug" | "info"`.
-   * @param message - Value of type `unknown`.
-   * @returns Result of type `void`.
+   * @param {"error" | "warn" | "debug" | "info"} level The level value.
+   * @param {unknown} message The message value.
+   * @returns {void} Result.
    */
   private logClientMessage(level: RoborockLogLevel, message: unknown) {
     if (Roborock.logLevelPriority[level] > Roborock.logLevelPriority[this.cfg.logLevel]) return;
@@ -459,10 +437,10 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Logs an internal bridge error unless its associated request has been aborted.
-   * @param message - Value of type `string`.
-   * @param error - Value of type `unknown`.
-   * @param signal - Value of type `AbortSignal | undefined`.
-   * @returns Result of type `void`.
+   * @param {string} message The message value.
+   * @param {unknown} error The error value.
+   * @param {AbortSignal | undefined} signal The signal value.
+   * @returns {void} Result.
    */
   private logError(message: string, error: unknown, signal?: AbortSignal) {
     if (this.destroyed || signal?.aborted) return;
