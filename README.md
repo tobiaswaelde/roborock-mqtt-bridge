@@ -47,5 +47,6 @@ mosquitto_pub -h mqtt.example.net -t 'home/roborock/home/devices/ROBOROCK-DUID/c
 - [Configuration](https://tobiaswaelde.github.io/roborock-mqtt-bridge/configuration)
 - [Authentication](https://tobiaswaelde.github.io/roborock-mqtt-bridge/authentication)
 - [MQTT contract](https://tobiaswaelde.github.io/roborock-mqtt-bridge/mqtt)
+- [Enum values](https://tobiaswaelde.github.io/roborock-mqtt-bridge/enum-values)
 - [Docker deployment](https://tobiaswaelde.github.io/roborock-mqtt-bridge/deployment)
 - [WLED MQTT Bridge for local lighting](https://tobiaswaelde.github.io/wled-mqtt-bridge/)
