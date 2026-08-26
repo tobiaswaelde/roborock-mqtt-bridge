@@ -6,17 +6,22 @@ import { ENV } from '~/config/env';
 import { HttpMqttBridge } from '~/lib/http-mqtt-bridge';
 import type { MqttBridgeClient } from '~/modules/mqtt/mqtt.service';
 import type { RoborockConfig, RoborockLogLevel } from '~/types/config/roborock';
-import { objectToMap } from '~/util/object';
 import { asRecord, redact } from './data';
 import {
   COMMAND_METHODS,
   REGION_CLOUD_HOSTS,
+  SUCTION_POWER_LEVELS,
   type RegionResponse,
   type RoborockAuthenticationStatus,
   type RoborockCommand,
   type RoborockDevice,
   type RoborockSession,
+  type SuctionPowerLevel,
 } from './types';
+
+interface RoborockSettingsClient {
+  runMatterSettingCommand(deviceId: string, command: 'set_custom_mode', value: number): Promise<unknown>;
+}
 
 /** Bridges one Roborock account's state, authentication, and supported commands to MQTT. */
 export class Roborock extends HttpMqttBridge<RoborockConfig> {
@@ -200,7 +205,12 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
     const deviceId = typeof record?.duid === 'string' ? record.duid : undefined;
     const payload = record?.payload ?? record;
     const safePayload = redact(payload);
-    const prefix = deviceId ? `${this.cfg.topic}/devices/${deviceId}` : `${this.cfg.topic}/events/${event}`;
+    if (deviceId) {
+      this.publishDeviceState(deviceId, safePayload);
+      return;
+    }
+
+    const prefix = `${this.bridgeTopic}/events/${event}`;
     this.publishJson(`${prefix}/json`, safePayload);
     this.publishData(prefix, safePayload);
   }
@@ -221,23 +231,40 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
         productModel: device.productModel,
         serialNumber: device.serialNumber,
       };
-      this.publishData(`${this.cfg.topic}/devices/${device.duid}/info`, info);
+      this.publishData(`${this.deviceTopic(device.duid)}/info`, info);
     }
   }
 
-  /** Subscribes to the allowlisted vacuum-command topic. */
+  /** Subscribes to device-scoped action and suction-power command topics. */
   private subscribeCommands() {
-    const topic = `${this.cfg.topic}/set/json`;
-    this.subscribe(topic, (_, payload) => {
+    const commandTopic = `${this.cfg.topic}/devices/+/command/json`;
+    this.subscribe(commandTopic, (topic, payload) => {
       if (!payload) return;
       try {
         const command = JSON.parse(payload) as unknown;
         if (!this.isCommand(command)) throw new Error('Invalid command.');
-        void this.executeCommand(command);
+
+        const deviceId = this.commandDeviceId(topic, '/command/json');
+        if (!deviceId) throw new Error('Invalid device command topic.');
+
+        void this.executeCommand(deviceId, command);
         this.mqtt.publish(topic, null);
       } catch (error) {
         this.logError(`Invalid Roborock command on ${topic}.`, error);
       }
+    });
+
+    const suctionTopic = `${this.cfg.topic}/devices/+/command/suction_power`;
+    this.subscribe(suctionTopic, (topic, payload) => {
+      const deviceId = this.commandDeviceId(topic, '/command/suction_power');
+      const power = payload.trim().toLowerCase();
+      if (!deviceId || !this.isSuctionPowerLevel(power)) {
+        this.logger.warn(`Invalid Roborock suction-power command on ${topic}.`);
+        return;
+      }
+
+      void this.setSuctionPower(deviceId, power);
+      this.mqtt.publish(topic, null);
     });
   }
 
@@ -245,17 +272,30 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   private isCommand(value: unknown): value is RoborockCommand {
     const command = asRecord(value);
     return (
-      typeof command?.deviceId === 'string' &&
-      command.deviceId.length > 0 &&
+      !!command &&
       typeof command.command === 'string' &&
       Object.hasOwn(COMMAND_METHODS, command.command) &&
       (command.options === undefined || asRecord(command.options) !== undefined)
     );
   }
 
+  /** Extracts one device ID from a device-scoped command topic. */
+  private commandDeviceId(topic: string, suffix: string) {
+    const prefix = `${this.cfg.topic}/devices/`;
+    if (!topic.startsWith(prefix) || !topic.endsWith(suffix)) return;
+
+    const deviceId = topic.slice(prefix.length, -suffix.length);
+    return deviceId && !deviceId.includes('/') ? deviceId : undefined;
+  }
+
+  /** Checks whether the supplied MQTT payload names a supported suction-power level. */
+  private isSuctionPowerLevel(value: string): value is SuctionPowerLevel {
+    return Object.hasOwn(SUCTION_POWER_LEVELS, value);
+  }
+
   /** Subscribes to the one-time-code request and verification topics. */
   private subscribeAuthentication() {
-    const requestTopic = `${this.cfg.topic}/auth/request`;
+    const requestTopic = `${this.bridgeTopic}/auth/request`;
     this.subscribe(requestTopic, () => {
       this.mqtt.publish(requestTopic, null);
       const client = this.client;
@@ -263,7 +303,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
       void this.requestTwoFactorCode(client);
     });
 
-    const verifyTopic = `${this.cfg.topic}/auth/verify`;
+    const verifyTopic = `${this.bridgeTopic}/auth/verify`;
     this.subscribe(verifyTopic, (_, payload) => {
       this.mqtt.publish(verifyTopic, null);
       const code = payload.trim();
@@ -298,7 +338,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Invokes an allowlisted vacuum command when the account is ready. */
-  private async executeCommand(command: RoborockCommand) {
+  private async executeCommand(deviceId: string, command: RoborockCommand) {
     const client = this.client;
     if (!client || !client.isInited()) {
       this.logger.warn('Ignored Roborock command because the account is not connected.');
@@ -306,29 +346,144 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
     }
 
     try {
-      await client[COMMAND_METHODS[command.command]](command.deviceId, command.options);
+      await client[COMMAND_METHODS[command.command]](deviceId, command.options);
     } catch (error) {
-      this.logError(`Failed to execute Roborock ${command.command} for ${command.deviceId}.`, error);
+      this.logError(`Failed to execute Roborock ${command.command} for ${deviceId}.`, error);
+    }
+  }
+
+  /** Sets the named suction-power level through Roborock's device settings API. */
+  private async setSuctionPower(deviceId: string, power: SuctionPowerLevel) {
+    const client = this.client;
+    if (!client || !client.isInited()) {
+      this.logger.warn('Ignored Roborock suction-power command because the account is not connected.');
+      return;
+    }
+
+    try {
+      await (client as RoborockClient & RoborockSettingsClient).runMatterSettingCommand(
+        deviceId,
+        'set_custom_mode',
+        SUCTION_POWER_LEVELS[power],
+      );
+    } catch (error) {
+      this.logError(`Failed to set Roborock suction power for ${deviceId}.`, error);
     }
   }
 
   /** Publishes the bridge connection state. */
   private setConnected(connected: boolean) {
-    this.mqtt.publish(`${this.cfg.topic}/connected`, connected);
+    this.mqtt.publish(`${this.bridgeTopic}/connected`, connected);
   }
 
   /** Publishes the current one-time-code authentication state. */
   private setAuthenticationStatus(status: RoborockAuthenticationStatus) {
-    this.mqtt.publish(`${this.cfg.topic}/auth/status`, status);
+    this.mqtt.publish(`${this.bridgeTopic}/auth/status`, status);
   }
 
-  /** Flattens a structured, non-sensitive payload into MQTT scalar topics. */
-  private publishData(topic: string, data: unknown) {
-    if (!data || typeof data !== 'object') return;
-    for (const [path, value] of objectToMap(data)) {
-      if (value === null || value === undefined) continue;
-      this.mqtt.publish(`${topic}/${path}`, value);
+  /** Publishes a sanitized device state and a readable suction-power level when available. */
+  private publishDeviceState(deviceId: string, data: unknown) {
+    const topic = `${this.deviceTopic(deviceId)}/state`;
+    const state = this.normalizeDeviceState(data);
+    this.publishJson(`${topic}/json`, state);
+    this.publishData(topic, state);
+    this.publishRooms(deviceId, data);
+
+    const code = this.findSuctionPowerCode(state);
+    if (code === undefined) return;
+
+    this.mqtt.publish(`${topic}/suction_power_code`, code);
+    const power = Object.entries(SUCTION_POWER_LEVELS).find(([, value]) => value === code)?.[0];
+    if (power) this.mqtt.publish(`${topic}/suction_power`, power);
+  }
+
+  /** Unwraps Roborock's single-item status arrays into one stable state object. */
+  private normalizeDeviceState(value: unknown) {
+    const candidate = this.unwrapDeviceState(value);
+    const state = asRecord(candidate);
+    if (!state) return candidate;
+
+    const { rooms: _rooms, ...withoutRooms } = state;
+    return withoutRooms;
+  }
+
+  /** Publishes room information outside the device-state namespace. */
+  private publishRooms(deviceId: string, value: unknown) {
+    const rooms = asRecord(this.unwrapDeviceState(value))?.rooms;
+    if (!Array.isArray(rooms)) return;
+
+    const topic = `${this.deviceTopic(deviceId)}/rooms`;
+    const safeRooms = rooms.map((room) => redact(room));
+    this.publishJson(`${topic}/json`, safeRooms);
+
+    for (const room of safeRooms) {
+      const record = asRecord(room);
+      const id = record?.roomId ?? record?.segmentId;
+      if (!this.isTopicSegment(id)) continue;
+
+      const roomTopic = `${topic}/${id}`;
+      this.publishJson(`${roomTopic}/json`, room);
+      this.publishData(roomTopic, room);
     }
+  }
+
+  /** Unwraps the single status entry returned by Roborock for some device events. */
+  private unwrapDeviceState(value: unknown) {
+    return Array.isArray(value) && value.length === 1 && asRecord(value[0]) ? value[0] : value;
+  }
+
+  /** Finds a reported fan-power code in a nested Roborock state payload. */
+  private findSuctionPowerCode(value: unknown): number | undefined {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const code = this.findSuctionPowerCode(entry);
+        if (code !== undefined) return code;
+      }
+      return;
+    }
+
+    const record = asRecord(value);
+    if (!record) return;
+    const fanPower = record.fan_power;
+    if (typeof fanPower === 'number' && Number.isFinite(fanPower)) return fanPower;
+
+    for (const entry of Object.values(record)) {
+      const code = this.findSuctionPowerCode(entry);
+      if (code !== undefined) return code;
+    }
+    return;
+  }
+
+  /** Returns the topic segment reserved for bridge-wide state and events. */
+  private get bridgeTopic() {
+    return `${this.cfg.topic}/bridge`;
+  }
+
+  /** Returns the topic segment reserved for one Roborock device. */
+  private deviceTopic(deviceId: string) {
+    return `${this.cfg.topic}/devices/${deviceId}`;
+  }
+
+  /** Publishes direct, named scalar fields without creating array-index topic segments. */
+  private publishData(topic: string, data: unknown) {
+    const record = asRecord(data);
+    if (!record) return;
+
+    for (const [key, value] of Object.entries(record)) {
+      if (!this.isTopicSegment(key) || !this.isScalar(value)) continue;
+      this.mqtt.publish(`${topic}/${key}`, value);
+    }
+  }
+
+  /** Checks that a value is safe to use as one MQTT topic segment. */
+  private isTopicSegment(value: unknown): value is string | number {
+    const segment = typeof value === 'string' || typeof value === 'number' ? String(value) : undefined;
+    return !!segment && /^[^/\s]+$/.test(segment);
+  }
+
+  /** Checks whether a value can be represented as one MQTT scalar payload. */
+  private isScalar(value: unknown): value is string | number | boolean {
+    return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
   }
 
   /** Publishes a structured, non-sensitive payload as JSON. */

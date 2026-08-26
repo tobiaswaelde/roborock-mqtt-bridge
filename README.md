@@ -36,7 +36,7 @@ instances:
 Example command:
 
 ```bash
-mosquitto_pub -h mqtt.example.net -t 'home/roborock/home/set/json' -m '{"deviceId":"ROBOROCK-DUID","command":"start"}'
+mosquitto_pub -h mqtt.example.net -t 'home/roborock/home/devices/ROBOROCK-DUID/command/suction_power' -m turbo
 ```
 
 ## Documentation

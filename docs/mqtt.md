@@ -1,13 +1,30 @@
 # MQTT contract
 
-Account availability is `<topic>/connected`. Device data is published below `<topic>/devices/<device-id>/...`; sensitive keys are removed before publishing.
+All topics are grouped by their owner. Sensitive keys are removed before state is published.
 
-Allowlisted commands use `<topic>/set/json`:
-
-```json
-{ "deviceId": "ROBOROCK-DUID", "command": "start" }
+```text
+<topic>/bridge/connected
+<topic>/bridge/auth/{request,verify,status}
+<topic>/bridge/events/<event>/{json,...}
+<topic>/devices/<device-id>/info/{model,name,productModel,serialNumber}
+<topic>/devices/<device-id>/state/{json,...}
+<topic>/devices/<device-id>/state/{suction_power,suction_power_code}
+<topic>/devices/<device-id>/rooms/json
+<topic>/devices/<device-id>/rooms/<room-id>/{json,...}
+<topic>/devices/<device-id>/command/json
+<topic>/devices/<device-id>/command/suction_power
 ```
 
-Supported commands are `start`, `stop`, `pause`, `charge`, and `find`.
+`state/json` contains the normalized, sanitized status object; the remaining `state/...` topics contain only its direct named scalar values. Arrays and nested objects are not expanded into numeric topic segments. Room data is available separately under `rooms`. `suction_power` is a readable level, while `suction_power_code` is the original Roborock numeric value.
 
-All command publications must be non-retained. The bridge clears a successfully received command topic with an empty payload.
+Allowlisted actions use a device-scoped JSON command:
+
+```json
+{ "command": "start" }
+```
+
+Publish it to `<topic>/devices/<device-id>/command/json`. Supported actions are `start`, `stop`, `pause`, `charge`, and `find`.
+
+Set suction power by publishing one of `silent`, `balanced`, `turbo`, `max`, `max_plus`, `off`, or `custom` as a plain payload to `<topic>/devices/<device-id>/command/suction_power`. Available levels depend on the robot model.
+
+All command publications must be non-retained.

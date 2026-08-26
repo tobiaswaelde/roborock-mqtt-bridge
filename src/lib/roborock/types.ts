@@ -15,11 +15,25 @@ export const COMMAND_METHODS = {
   stop: 'app_stop',
 } as const;
 
+/** Roborock fan-power codes keyed by their stable MQTT representation. */
+export const SUCTION_POWER_LEVELS = {
+  balanced: 102,
+  custom: 106,
+  max: 104,
+  max_plus: 108,
+  off: 105,
+  silent: 101,
+  turbo: 103,
+} as const;
+
 /** Values published below the MQTT authentication-status topic. */
 export type RoborockAuthenticationStatus = 'authenticated' | 'failed' | 'verification-code-sent';
 
 /** Command names accepted by the bridge. */
 export type RoborockCommandName = keyof typeof COMMAND_METHODS;
+
+/** A supported named Roborock suction-power level. */
+export type SuctionPowerLevel = keyof typeof SUCTION_POWER_LEVELS;
 
 /** Persisted cloud authentication payload. */
 export type RoborockSession = Record<string, unknown>;
@@ -27,7 +41,6 @@ export type RoborockSession = Record<string, unknown>;
 /** Command payload received from MQTT. */
 export interface RoborockCommand {
   command: RoborockCommandName;
-  deviceId: string;
   options?: Record<string, unknown>;
 }
 
