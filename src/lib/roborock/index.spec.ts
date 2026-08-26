@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { ENV } from '~/config/env';
 import type { MqttBridgeClient } from '~/modules/mqtt/mqtt.service';
 import type { RoborockConfig } from '~/types/config/roborock';
 import { Roborock } from './index';
@@ -158,5 +159,47 @@ describe('Roborock', () => {
 
     expect(client.runMatterSettingCommand).toHaveBeenCalledWith('robot-1', 'set_custom_mode', 103);
     expect(mqtt.publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/command/suction_power', null);
+  });
+
+  it('stores the latest map and retains its path for later MQTT subscribers', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'mqtt-bridges-roborock-map-path-'));
+    const originalStoragePath = ENV.MAP_STORAGE_PATH;
+    const publish = jest.fn();
+    const mqtt = { publish, subscribe: jest.fn(() => jest.fn()) } as unknown as MqttBridgeClient;
+    const bridge = new Roborock(cfg, mqtt);
+    const client = {
+      getCurrentMapIdForDevice: jest.fn().mockReturnValue(42),
+      messageQueueHandler: { sendRequest: jest.fn().mockResolvedValue(Buffer.from('map-data')) },
+      vacuums: {
+        'robot-1': {
+          mapParser: {
+            parsedata: jest.fn().mockResolvedValue({
+              IMAGE: {
+                dimensions: { height: 2, width: 2 },
+                pixels: { floor: [0, 1, 2, 3], obstacle: [], segments: [] },
+              },
+            }),
+          },
+        },
+      },
+    };
+    const instance = bridge as unknown as {
+      storeCurrentMap(client: object, deviceId: string): Promise<void>;
+    };
+    ENV.MAP_STORAGE_PATH = directory;
+
+    try {
+      await instance.storeCurrentMap(client, 'robot-1');
+      await instance.storeCurrentMap(client, 'robot-1');
+
+      const file = publish.mock.calls.find(([topic]) => topic.endsWith('/map/current/path'))?.[1] as string;
+      expect(file).toBe(path.join(directory, 'robot-1', '42.png'));
+      await expect(stat(file)).resolves.toBeDefined();
+      expect(client.messageQueueHandler.sendRequest).toHaveBeenCalledTimes(2);
+      expect(publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/map/current/path', file, { retain: true });
+    } finally {
+      ENV.MAP_STORAGE_PATH = originalStoragePath;
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 });

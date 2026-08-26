@@ -5,8 +5,13 @@ import { resolveMqttClientId } from './client-id';
 
 export type MqttMessageHandler = (topic: string, payload: string) => void;
 
+/** Controls optional MQTT publishing behavior. */
+export interface MqttPublishOptions {
+  retain?: boolean;
+}
+
 export interface MqttBridgeClient {
-  publish(topic: string, payload: string | number | boolean | null): void;
+  publish(topic: string, payload: string | number | boolean | null, options?: MqttPublishOptions): void;
   subscribe(topic: string, handler: MqttMessageHandler): () => void;
 }
 
@@ -34,12 +39,12 @@ export class MqttService implements MqttBridgeClient, OnModuleDestroy {
     this.client.on('error', (error) => this.logger.error('MQTT connection failed', error));
     this.client.on('message', (topic, payload) => this.dispatch(topic, payload.toString()));
   }
-  /** Publishes a non-retained MQTT value, using an empty payload to clear a command topic. */
-  publish(topic: string, payload: string | number | boolean | null) {
+  /** Publishes an MQTT value, using an empty payload to clear a command topic. */
+  publish(topic: string, payload: string | number | boolean | null, options?: MqttPublishOptions) {
     this.client.publish(
       topic,
       payload === null ? '' : String(payload),
-      { retain: false },
+      { retain: options?.retain ?? false },
       (error) => error && this.logger.error(`Failed to publish ${topic}`, error),
     );
   }

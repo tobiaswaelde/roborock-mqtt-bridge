@@ -6,8 +6,10 @@ services:
     environment:
       CORS_ORIGIN: '${CORS_ORIGIN:-*}'
       HOST: '${HOST:-0.0.0.0}'
+      MAP_STORAGE_PATH: '${MAP_STORAGE_PATH:-/app/maps}'
       PORT: '${PORT:-3000}'
     volumes:
       - ./config:/app/config
+      - ./maps:/app/maps
     ports:
       - '${PORT:-3000}:${PORT:-3000}'

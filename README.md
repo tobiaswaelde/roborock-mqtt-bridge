@@ -33,6 +33,8 @@ instances:
 
 `mqtt.clientId` may be empty; the bridge then generates a UUID for the running process.
 
+Rendered map images are written atomically to `MAP_STORAGE_PATH/<device-id>/<map-id>.png` (default: `maps`), replacing a prior image for the same map. Docker Compose mounts `./maps` at `/app/maps` so other host applications can read them.
+
 Example command:
 
 ```bash

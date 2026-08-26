@@ -7,6 +7,7 @@ import { HttpMqttBridge } from '~/lib/http-mqtt-bridge';
 import type { MqttBridgeClient } from '~/modules/mqtt/mqtt.service';
 import type { RoborockConfig, RoborockLogLevel } from '~/types/config/roborock';
 import { asRecord, redact } from './data';
+import { storeMapImage, type RoborockMapImage } from './map';
 import {
   COMMAND_METHODS,
   REGION_CLOUD_HOSTS,
@@ -23,6 +24,21 @@ interface RoborockSettingsClient {
   runMatterSettingCommand(deviceId: string, command: 'set_custom_mode', value: number): Promise<unknown>;
 }
 
+interface RoborockMapClient {
+  getCurrentMapIdForDevice?(deviceId: string): number | null;
+  messageQueueHandler?: {
+    sendRequest(deviceId: string, method: string, parameters: unknown[], secure: boolean): Promise<unknown>;
+  };
+  vacuums?: Record<
+    string,
+    {
+      mapParser?: {
+        parsedata(map: Buffer): Promise<unknown>;
+      };
+    }
+  >;
+}
+
 /** Bridges one Roborock account's state, authentication, and supported commands to MQTT. */
 export class Roborock extends HttpMqttBridge<RoborockConfig> {
   private static readonly logLevelPriority: Record<RoborockLogLevel, number> = {
@@ -34,6 +50,8 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
 
   private client?: RoborockClient;
   private destroyed = false;
+  private readonly mapHashes = new Map<string, string>();
+  private readonly mapRequests = new Set<string>();
 
   /** Creates a bridge for one configured Roborock account. */
   constructor(cfg: RoborockConfig, mqtt: MqttBridgeClient) {
@@ -188,7 +206,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
     if (this.destroyed || client !== this.client) return;
 
     this.setConnected(true);
-    this.publishHomeData(client.states.HomeData?.val);
+    this.publishHomeData(client, client.states.HomeData?.val);
   }
 
   /** Converts a cloud or local client notification into redacted MQTT publications. */
@@ -197,7 +215,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
 
     if (event === 'HomeData') {
       const record = asRecord(state);
-      this.publishHomeData(record?.val);
+      this.publishHomeData(client, record?.val);
       return;
     }
 
@@ -216,7 +234,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   }
 
   /** Publishes non-sensitive device metadata from the Roborock home-data response. */
-  private publishHomeData(value: unknown) {
+  private publishHomeData(client: RoborockClient, value: unknown) {
     const data = this.parseJson(value);
     const devices = asRecord(data)?.devices;
     if (!Array.isArray(devices)) return;
@@ -232,7 +250,93 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
         serialNumber: device.serialNumber,
       };
       this.publishData(`${this.deviceTopic(device.duid)}/info`, info);
+      void this.storeCurrentMap(client, device.duid);
     }
+  }
+
+  /** Fetches, renders, and publishes the current floor-plan image for one device. */
+  private async storeCurrentMap(client: RoborockClient, deviceId: string) {
+    if (this.mapRequests.has(deviceId)) return;
+
+    const mapClient = client as RoborockClient & RoborockMapClient;
+    const parser = mapClient.vacuums?.[deviceId]?.mapParser;
+    if (!mapClient.messageQueueHandler || !parser) return;
+
+    this.mapRequests.add(deviceId);
+    try {
+      const response = await mapClient.messageQueueHandler.sendRequest(deviceId, 'get_map_v1', [], true);
+      if (!Buffer.isBuffer(response)) {
+        this.logger.debug(`Roborock did not return a map buffer for ${deviceId}.`);
+        return;
+      }
+
+      const hash = createHash('sha256').update(response).digest('hex');
+      if (this.mapHashes.get(deviceId) === hash) return;
+
+      const parsedMap = await parser.parsedata(response);
+      const image = this.mapImage(parsedMap);
+      if (!image) {
+        this.logger.debug(`Roborock returned no renderable map image for ${deviceId}.`);
+        return;
+      }
+
+      const file = await storeMapImage(
+        ENV.MAP_STORAGE_PATH,
+        deviceId,
+        this.mapId(mapClient, deviceId, parsedMap),
+        image,
+      );
+      this.mapHashes.set(deviceId, hash);
+      this.mqtt.publish(`${this.deviceTopic(deviceId)}/map/current/path`, file, { retain: true });
+    } catch (error) {
+      this.logger.warn(
+        `Could not store the current Roborock map for ${deviceId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      this.mapRequests.delete(deviceId);
+    }
+  }
+
+  /** Converts a parsed RRMap image block into the renderer's small, validated data shape. */
+  private mapImage(value: unknown): RoborockMapImage | undefined {
+    const image = asRecord(asRecord(value)?.IMAGE);
+    const dimensions = asRecord(image?.dimensions);
+    const pixels = asRecord(image?.pixels);
+    const width = dimensions?.width;
+    const height = dimensions?.height;
+    if (
+      typeof width !== 'number' ||
+      typeof height !== 'number' ||
+      !Number.isInteger(width) ||
+      !Number.isInteger(height) ||
+      width <= 0 ||
+      height <= 0
+    )
+      return;
+
+    return {
+      floor: this.numberArray(pixels?.floor),
+      height,
+      obstacle: this.numberArray(pixels?.obstacle),
+      segments: this.numberArray(pixels?.segments),
+      width,
+    };
+  }
+
+  /** Resolves the stable saved-map ID, with a per-device current-map fallback. */
+  private mapId(client: RoborockMapClient, deviceId: string, value: unknown) {
+    const mapId = client.getCurrentMapIdForDevice?.(deviceId);
+    if (typeof mapId === 'number' && Number.isInteger(mapId) && mapId >= 0) return mapId;
+
+    const mapIndex = asRecord(asRecord(value)?.metaData)?.map_index;
+    if (typeof mapIndex === 'number' && Number.isInteger(mapIndex) && mapIndex >= 0) return mapIndex;
+
+    return 'current' as const;
+  }
+
+  /** Keeps only numeric pixel offsets from a parsed RRMap array. */
+  private numberArray(value: unknown) {
+    return Array.isArray(value) ? value.filter((entry): entry is number => typeof entry === 'number') : [];
   }
 
   /** Subscribes to device-scoped action and suction-power command topics. */

@@ -38,8 +38,8 @@ ENV NODE_ENV=production CONFIG_FILE=/app/config/config.yml
 COPY --from=build /app/dist ./dist
 COPY config/config.example.yml /app/config/config.example.yml
 
-# The mounted config directory stays writable by the unprivileged bridge user.
-RUN useradd --system --uid 10001 bridge && chown -R bridge:bridge /app
+# The mounted config and map directories stay writable by the unprivileged bridge user.
+RUN useradd --system --uid 10001 bridge && mkdir /app/maps && chown -R bridge:bridge /app
 USER bridge
 
 # -----------------------------------------------------------------------------

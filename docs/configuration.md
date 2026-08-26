@@ -15,7 +15,7 @@ instances:
 
 - `mqtt` configures the single shared broker connection.
 - `mqtt.clientId` may be empty; the bridge generates a UUID for the running process.
-- HTTP settings are environment variables: `HOST` defaults to `0.0.0.0`, `PORT` defaults to `3000`, and `CORS_ORIGIN` defaults to `*`. Dotenv loads `.env` from the working directory; Docker Compose environment values take precedence.
+- HTTP settings are environment variables: `HOST` defaults to `0.0.0.0`, `PORT` defaults to `3000`, and `CORS_ORIGIN` defaults to `*`. `MAP_STORAGE_PATH` selects the directory for rendered map PNGs and defaults to `maps`. Dotenv loads `.env` from the working directory; Docker Compose environment values take precedence.
 - Every `instances[].id` and `instances[].topic` must be unique.
 
 ## Roborock MQTT Bridge example
