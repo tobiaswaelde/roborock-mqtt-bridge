@@ -1,13 +1,9 @@
 import { Controller, Get } from '@nestjs/common';
-/**
- * Executes `HealthController`.
- */
+
+/** Reports process health for container and orchestration probes. */
 @Controller('health')
 export class HealthController {
-  /**
-   * Executes `getHealth`.
-   * @returns {{ status: string; name: string; version: string; uptime: number; }} Result.
-   */
+  /** Returns the service identity and process uptime. */
   @Get() getHealth() {
     return {
       status: 'ok',

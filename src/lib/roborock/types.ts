@@ -1,13 +1,13 @@
-/** Regional cloud hosts used for automatic account discovery. */
-export const REGION_HOSTS = {
+/** Regional cloud hosts queried when the account does not configure one explicitly. */
+export const REGION_CLOUD_HOSTS = {
   auto: ['euiot.roborock.com', 'usiot.roborock.com', 'cniot.roborock.com', 'ruiot.roborock.com'],
   cn: ['cniot.roborock.com'],
   eu: ['euiot.roborock.com'],
   us: ['usiot.roborock.com'],
 } as const;
 
-/** Allowlisted MQTT command names and their Roborock client methods. */
-export const COMMANDS = {
+/** MQTT commands that the bridge is allowed to pass to the Roborock client. */
+export const COMMAND_METHODS = {
   charge: 'app_charge',
   find: 'find_me',
   pause: 'app_pause',
@@ -17,8 +17,10 @@ export const COMMANDS = {
 
 /** Values published below the MQTT authentication-status topic. */
 export type RoborockAuthenticationStatus = 'authenticated' | 'failed' | 'verification-code-sent';
+
 /** Command names accepted by the bridge. */
-export type RoborockCommandName = keyof typeof COMMANDS;
+export type RoborockCommandName = keyof typeof COMMAND_METHODS;
+
 /** Persisted cloud authentication payload. */
 export type RoborockSession = Record<string, unknown>;
 

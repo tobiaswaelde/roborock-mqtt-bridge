@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { HealthController } from './health.controller';
-/**
- * Executes `HealthModule`.
- */
+
+/** Exposes the lightweight HTTP health endpoint. */
 @Module({ controllers: [HealthController] })
 export class HealthModule {}

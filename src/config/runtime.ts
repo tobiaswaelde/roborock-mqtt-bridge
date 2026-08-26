@@ -2,6 +2,7 @@ import { load } from 'js-yaml';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+
 export const instanceSchema = z.object({
   id: z
     .string()
@@ -10,6 +11,7 @@ export const instanceSchema = z.object({
   enabled: z.boolean().default(true),
   topic: z.string().min(1),
 });
+
 export const commonSchema = z.object({
   mqtt: z.object({
     protocol: z.enum(['mqtt', 'mqtts']).default('mqtt'),
@@ -21,33 +23,20 @@ export const commonSchema = z.object({
     keepAliveSeconds: z.number().int().positive().default(30),
     reconnectDelayMs: z.number().int().positive().default(5000),
   }),
-  http: z
-    .object({ host: z.string().default('0.0.0.0'), port: z.number().int().positive().default(3000) })
-    .default({ host: '0.0.0.0', port: 3000 }),
-  logging: z
-    .object({ level: z.enum(['error', 'warn', 'log', 'debug', 'verbose']).default('log') })
-    .default({ level: 'log' }),
 });
-/**
- * Executes `configFilePath`.
- * @returns {string} Result.
- */
+
+/** Resolves the config file from `CONFIG_FILE`, `--config`, or the default location. */
 export function configFilePath() {
   const index = process.argv.indexOf('--config');
   return path.resolve(process.env.CONFIG_FILE ?? (index >= 0 ? process.argv[index + 1] : 'config/config.yml'));
 }
-/**
- * Executes `configDirectory`.
- * @returns {string} Result.
- */
+
+/** Returns the directory containing the active configuration file. */
 export function configDirectory() {
   return path.dirname(configFilePath());
 }
-/**
- * Executes `loadConfig`.
- * @param {T} schema The schema value.
- * @returns {output<T>} Result.
- */
+
+/** Reads and validates the YAML configuration against the supplied schema. */
 export function loadConfig<T extends z.ZodType>(schema: T): z.infer<T> {
   const file = configFilePath();
   if (!existsSync(file)) throw new Error(`Configuration file not found: ${file}`);

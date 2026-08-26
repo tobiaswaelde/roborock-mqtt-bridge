@@ -4,22 +4,19 @@ import { CONFIG } from '~/config/config';
 import { resolveMqttClientId } from './client-id';
 
 export type MqttMessageHandler = (topic: string, payload: string) => void;
+
 export interface MqttBridgeClient {
   publish(topic: string, payload: string | number | boolean | null): void;
   subscribe(topic: string, handler: MqttMessageHandler): () => void;
 }
 
-/**
- * Executes `MqttService`.
- */
+/** Owns one MQTT connection and dispatches inbound messages to local handlers. */
 @Injectable()
 export class MqttService implements MqttBridgeClient, OnModuleDestroy {
   private readonly logger = new Logger(MqttService.name);
   private readonly client: MqttClient;
   private readonly subscriptions = new Map<string, Set<MqttMessageHandler>>();
-  /**
-   * Creates the class instance.
-   */
+  /** Opens the shared MQTT connection using the validated configuration. */
   constructor() {
     const { mqtt } = CONFIG;
     const clientId = resolveMqttClientId(mqtt.clientId);
@@ -37,12 +34,7 @@ export class MqttService implements MqttBridgeClient, OnModuleDestroy {
     this.client.on('error', (error) => this.logger.error('MQTT connection failed', error));
     this.client.on('message', (topic, payload) => this.dispatch(topic, payload.toString()));
   }
-  /**
-   * Executes `publish`.
-   * @param {string} topic The topic value.
-   * @param {string | number | boolean | null} payload The payload value.
-   * @returns {void} Result.
-   */
+  /** Publishes a non-retained MQTT value, using an empty payload to clear a command topic. */
   publish(topic: string, payload: string | number | boolean | null) {
     this.client.publish(
       topic,
@@ -51,12 +43,7 @@ export class MqttService implements MqttBridgeClient, OnModuleDestroy {
       (error) => error && this.logger.error(`Failed to publish ${topic}`, error),
     );
   }
-  /**
-   * Executes `subscribe`.
-   * @param {string} filter The filter value.
-   * @param {MqttMessageHandler} handler The handler value.
-   * @returns {() => void} Result.
-   */
+  /** Adds a local handler and subscribes the broker only for the first handler on a filter. */
   subscribe(filter: string, handler: MqttMessageHandler) {
     let handlers = this.subscriptions.get(filter);
     if (!handlers) {
@@ -74,42 +61,35 @@ export class MqttService implements MqttBridgeClient, OnModuleDestroy {
       this.client.unsubscribe(filter);
     };
   }
-  /**
-   * Executes `onModuleDestroy`.
-   * @returns {void} Result.
-   */
+  /** Clears local handlers and closes the shared MQTT connection. */
   onModuleDestroy() {
     this.subscriptions.clear();
     this.client.end();
   }
-  /**
-   * Executes `dispatch`.
-   * @param {string} topic The topic value.
-   * @param {string} payload The payload value.
-   * @returns {void} Result.
-   */
+  /** Dispatches an inbound MQTT payload to every matching local handler. */
   private dispatch(topic: string, payload: string) {
-    for (const [filter, handlers] of this.subscriptions)
-      if (matches(filter, topic))
-        for (const handler of handlers)
-          try {
-            handler(topic, payload);
-          } catch (error) {
-            this.logger.error(`MQTT handler failed for ${filter}`, error);
-          }
+    for (const [filter, handlers] of this.subscriptions) {
+      if (!matchesMqttTopic(filter, topic)) continue;
+
+      for (const handler of handlers) {
+        try {
+          handler(topic, payload);
+        } catch (error) {
+          this.logger.error(`MQTT handler failed for ${filter}`, error);
+        }
+      }
+    }
   }
 }
-/**
- * Executes `matches`.
- * @param {string} filter The filter value.
- * @param {string} topic The topic value.
- * @returns {boolean} Result.
- */
-function matches(filter: string, topic: string) {
-  const a = filter.split('/'),
-    b = topic.split('/');
-  return (
-    a.every((part, index) => (part === '#' ? index === a.length - 1 : part === '+' || part === b[index])) &&
-    (a.at(-1) === '#' || a.length === b.length)
-  );
+
+/** Checks whether an MQTT topic matches the broker filter's `+` and terminal `#` wildcards. */
+function matchesMqttTopic(filter: string, topic: string) {
+  const filterParts = filter.split('/');
+  const topicParts = topic.split('/');
+
+  for (const [index, filterPart] of filterParts.entries()) {
+    if (filterPart === '#') return index === filterParts.length - 1;
+    if (filterPart !== '+' && filterPart !== topicParts[index]) return false;
+  }
+  return filterParts.length === topicParts.length;
 }

@@ -22,10 +22,6 @@ mqtt:
   clientId: roborock-mqtt-bridge
   username: mqtt-user
   password: change-me
-http:
-  port: 3000
-logging:
-  level: warn
 instances:
   - id: home
     topic: home/roborock/home
