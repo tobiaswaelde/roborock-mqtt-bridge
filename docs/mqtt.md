@@ -16,7 +16,9 @@ All topics are grouped by their owner. Sensitive keys are removed before state i
 <topic>/devices/<device-id>/command/suction_power
 ```
 
-`state/json` contains the normalized, sanitized status object; the remaining `state/...` topics contain only its direct named scalar values. Arrays and nested objects are not expanded into numeric topic segments. Room data is available separately under `rooms`. `suction_power` is a readable level, while `suction_power_code` is the original Roborock numeric value.
+`state/json` contains the normalized, sanitized status object; the remaining `state/...` topics contain only its direct named scalar values. Arrays and nested objects are not expanded into numeric topic segments. Room data is available separately under `rooms`. Every documented numeric enum also receives a readable companion topic: for example, `state` is `2` and `state_human` is `Sleeping`. `suction_power` is a machine-readable level, while `suction_power_code_human` is its readable label.
+
+See [Enum values](./enum-values) for the documented status, error, suction, mop, water-level, and dock codes.
 
 `map/current/path` is retained and contains the absolute path of the latest rendered PNG map. Each changed map is stored atomically below `MAP_STORAGE_PATH/<device-id>/<map-id>.png`, replacing the prior image for that map instead of accumulating files. If the client has not yet reported a map ID, the bridge uses `current.png` in the device directory. Other processes can therefore read the file without handling MQTT image payloads.
 

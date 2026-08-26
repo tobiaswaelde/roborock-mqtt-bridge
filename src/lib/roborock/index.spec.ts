@@ -68,16 +68,20 @@ describe('Roborock', () => {
 
     instance.handleClientEvent(client, 'DeviceStatus', {
       duid: 'robot-1',
-      payload: { battery: 87, fan_power: 103, localKey: 'never-publish' },
+      payload: { battery: 87, error_code: 0, fan_power: 103, localKey: 'never-publish', state: 2 },
     });
 
     expect(mqtt.publish).toHaveBeenCalledWith(
       'home/roborock/devices/robot-1/state/json',
-      JSON.stringify({ battery: 87, fan_power: 103 }),
+      JSON.stringify({ battery: 87, error_code: 0, fan_power: 103, state: 2 }),
     );
     expect(mqtt.publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/state/battery', 87);
     expect(mqtt.publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/state/fan_power', 103);
+    expect(mqtt.publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/state/fan_power_human', 'Turbo');
+    expect(mqtt.publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/state/state_human', 'Sleeping');
+    expect(mqtt.publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/state/error_code_human', 'No error');
     expect(mqtt.publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/state/suction_power_code', 103);
+    expect(mqtt.publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/state/suction_power_code_human', 'Turbo');
     expect(mqtt.publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/state/suction_power', 'turbo');
   });
 

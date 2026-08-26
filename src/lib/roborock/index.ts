@@ -10,6 +10,7 @@ import { asRecord, redact } from './data';
 import { storeMapImage, type RoborockMapImage } from './map';
 import {
   COMMAND_METHODS,
+  humanizeRoborockEnum,
   REGION_CLOUD_HOSTS,
   SUCTION_POWER_LEVELS,
   type RegionResponse,
@@ -491,12 +492,16 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
     const state = this.normalizeDeviceState(data);
     this.publishJson(`${topic}/json`, state);
     this.publishData(topic, state);
+    this.publishHumanReadableEnums(topic, state);
     this.publishRooms(deviceId, data);
 
     const code = this.findSuctionPowerCode(state);
     if (code === undefined) return;
 
     this.mqtt.publish(`${topic}/suction_power_code`, code);
+    const label = humanizeRoborockEnum('suction_power_code', code);
+    if (label) this.mqtt.publish(`${topic}/suction_power_code_human`, label);
+
     const power = Object.entries(SUCTION_POWER_LEVELS).find(([, value]) => value === code)?.[0];
     if (power) this.mqtt.publish(`${topic}/suction_power`, power);
   }
@@ -576,6 +581,17 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
     for (const [key, value] of Object.entries(record)) {
       if (!this.isTopicSegment(key) || !this.isScalar(value)) continue;
       this.mqtt.publish(`${topic}/${key}`, value);
+    }
+  }
+
+  /** Publishes a readable companion topic for every known numeric state enum. */
+  private publishHumanReadableEnums(topic: string, data: unknown) {
+    const record = asRecord(data);
+    if (!record) return;
+
+    for (const [field, value] of Object.entries(record)) {
+      const label = humanizeRoborockEnum(field, value);
+      if (label) this.mqtt.publish(`${topic}/${field}_human`, label);
     }
   }
 
