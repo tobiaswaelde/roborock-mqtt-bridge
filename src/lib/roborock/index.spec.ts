@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -146,7 +147,7 @@ describe('Roborock', () => {
     const bridge = new Roborock(cfg, mqtt);
     const client = {
       isInited: jest.fn(() => true),
-      runMatterSettingCommand: jest.fn().mockResolvedValue(undefined),
+      runMatterSettingCommand: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
     };
     const instance = bridge as unknown as {
       client: typeof client;
@@ -168,16 +169,18 @@ describe('Roborock', () => {
   it('stores the latest map and retains its path for later MQTT subscribers', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'mqtt-bridges-roborock-map-path-'));
     const originalStoragePath = ENV.MAP_STORAGE_PATH;
-    const publish = jest.fn();
+    const publish = jest.fn<(topic: string, payload: unknown, options?: unknown) => void>();
     const mqtt = { publish, subscribe: jest.fn(() => jest.fn()) } as unknown as MqttBridgeClient;
     const bridge = new Roborock(cfg, mqtt);
     const client = {
       getCurrentMapIdForDevice: jest.fn().mockReturnValue(42),
-      messageQueueHandler: { sendRequest: jest.fn().mockResolvedValue(Buffer.from('map-data')) },
+      messageQueueHandler: {
+        sendRequest: jest.fn<() => Promise<Buffer>>().mockResolvedValue(Buffer.from('map-data')),
+      },
       vacuums: {
         'robot-1': {
           mapParser: {
-            parsedata: jest.fn().mockResolvedValue({
+            parsedata: jest.fn<() => Promise<unknown>>().mockResolvedValue({
               IMAGE: {
                 dimensions: { height: 2, width: 2 },
                 pixels: { floor: [0, 1, 2, 3], obstacle: [], segments: [] },

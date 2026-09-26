@@ -3,7 +3,7 @@ import { cleanEnv, num, str } from 'envalid';
 import path from 'node:path';
 import { configDirectory } from './runtime';
 
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env'), quiet: true });
 
 const environment = cleanEnv(process.env, {
   CORS_ORIGIN: str({ default: '*', desc: 'The allowed CORS origin' }),

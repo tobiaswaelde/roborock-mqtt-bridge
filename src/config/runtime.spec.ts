@@ -1,6 +1,6 @@
 import { load } from 'js-yaml';
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { commonSchema, instanceSchema } from './runtime';
 
 describe('configuration contract', () => {
@@ -24,7 +24,7 @@ describe('configuration contract', () => {
     expect(() => instanceSchema.parse({ id: 'living room', topic: 'home/one' })).toThrow();
   });
   it('validates the example and rejects duplicate instance ids or topics', async () => {
-    const file = path.resolve(__dirname, '../../config/config.example.yml');
+    const file = fileURLToPath(new URL('../../config/config.example.yml', import.meta.url));
     process.env.CONFIG_FILE = file;
     const { configSchema } = await import('./config');
     const example = load(readFileSync(file, 'utf8')) as { instances: Array<Record<string, unknown>> };
