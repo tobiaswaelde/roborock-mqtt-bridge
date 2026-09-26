@@ -42,6 +42,7 @@ interface RoborockMapClient {
 
 /** Bridges one Roborock account's state, authentication, and supported commands to MQTT. */
 export class Roborock extends HttpMqttBridge<RoborockConfig> {
+  private static readonly commandStatusRefreshDelay = 2_000;
   private static readonly logLevelPriority: Record<RoborockLogLevel, number> = {
     debug: 3,
     error: 0,
@@ -53,6 +54,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   private destroyed = false;
   private readonly mapHashes = new Map<string, string>();
   private readonly mapRequests = new Set<string>();
+  private readonly statusRefreshTimers = new Map<string, NodeJS.Timeout>();
 
   /** Creates a bridge for one configured Roborock account. */
   constructor(cfg: RoborockConfig, mqtt: MqttBridgeClient) {
@@ -73,6 +75,8 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
 
     this.destroyed = true;
     this.cancelRequest('region');
+    for (const timer of this.statusRefreshTimers.values()) clearTimeout(timer);
+    this.statusRefreshTimers.clear();
     const client = this.client;
     this.client = undefined;
     void client?.stopService().catch((error: unknown) => this.logError('Failed to stop Roborock.', error));
@@ -452,6 +456,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
 
     try {
       await client[COMMAND_METHODS[command.command]](deviceId, command.options);
+      this.scheduleStatusRefresh(client, deviceId);
     } catch (error) {
       this.logError(`Failed to execute Roborock ${command.command} for ${deviceId}.`, error);
     }
@@ -471,9 +476,30 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
         'set_custom_mode',
         SUCTION_POWER_LEVELS[power],
       );
+      this.scheduleStatusRefresh(client, deviceId);
     } catch (error) {
       this.logError(`Failed to set Roborock suction power for ${deviceId}.`, error);
     }
+  }
+
+  /** Refreshes device state shortly after the latest successfully accepted command. */
+  private scheduleStatusRefresh(client: RoborockClient, deviceId: string) {
+    if (this.destroyed || client !== this.client || !client.isInited()) return;
+
+    const currentTimer = this.statusRefreshTimers.get(deviceId);
+    if (currentTimer) clearTimeout(currentTimer);
+
+    const timer = setTimeout(() => {
+      if (this.statusRefreshTimers.get(deviceId) !== timer) return;
+      this.statusRefreshTimers.delete(deviceId);
+      if (this.destroyed || client !== this.client || !client.isInited()) return;
+
+      void client
+        .getStatus(deviceId, { force: true })
+        .catch((error: unknown) => this.logError(`Failed to refresh Roborock status for ${deviceId}.`, error));
+    }, Roborock.commandStatusRefreshDelay);
+    timer.unref();
+    this.statusRefreshTimers.set(deviceId, timer);
   }
 
   /** Publishes the bridge connection state. */

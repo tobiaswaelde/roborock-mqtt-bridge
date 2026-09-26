@@ -8,6 +8,8 @@ import type { RoborockConfig } from '~/types/config/roborock';
 import { Roborock } from './index';
 
 describe('Roborock', () => {
+  afterEach(() => jest.useRealTimers());
+
   const cfg: RoborockConfig = {
     email: 'robot@example.com',
     enabled: true,
@@ -135,7 +137,8 @@ describe('Roborock', () => {
     expect(publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/rooms/3/name', 'Living room');
   });
 
-  it('sets device suction power from its command topic', async () => {
+  it('refreshes device status two seconds after the latest JSON command', async () => {
+    jest.useFakeTimers();
     const handlers = new Map<string, (topic: string, payload: string) => void>();
     const mqtt = {
       publish: jest.fn(),
@@ -146,6 +149,48 @@ describe('Roborock', () => {
     } as unknown as MqttBridgeClient;
     const bridge = new Roborock(cfg, mqtt);
     const client = {
+      app_start: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      getStatus: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      isInited: jest.fn(() => true),
+    };
+    const instance = bridge as unknown as {
+      client: typeof client;
+      subscribeCommands(): void;
+    };
+    instance.client = client;
+    instance.subscribeCommands();
+    const handler = handlers.get('home/roborock/devices/+/command/json');
+    const topic = 'home/roborock/devices/robot-1/command/json';
+
+    handler?.(topic, JSON.stringify({ command: 'start' }));
+    await Promise.resolve();
+    expect(client.getStatus).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(1_000);
+    handler?.(topic, JSON.stringify({ command: 'start' }));
+    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(1_999);
+    expect(client.getStatus).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(1);
+    expect(client.app_start).toHaveBeenCalledTimes(2);
+    expect(client.getStatus).toHaveBeenCalledTimes(1);
+    expect(client.getStatus).toHaveBeenCalledWith('robot-1', { force: true });
+  });
+
+  it('sets device suction power and refreshes its status after two seconds', async () => {
+    jest.useFakeTimers();
+    const handlers = new Map<string, (topic: string, payload: string) => void>();
+    const mqtt = {
+      publish: jest.fn(),
+      subscribe: jest.fn((topic: string, handler: (topic: string, payload: string) => void) => {
+        handlers.set(topic, handler);
+        return jest.fn();
+      }),
+    } as unknown as MqttBridgeClient;
+    const bridge = new Roborock(cfg, mqtt);
+    const client = {
+      getStatus: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
       isInited: jest.fn(() => true),
       runMatterSettingCommand: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
     };
@@ -164,6 +209,69 @@ describe('Roborock', () => {
 
     expect(client.runMatterSettingCommand).toHaveBeenCalledWith('robot-1', 'set_custom_mode', 103);
     expect(mqtt.publish).toHaveBeenCalledWith('home/roborock/devices/robot-1/command/suction_power', null);
+    expect(client.getStatus).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect(client.getStatus).toHaveBeenCalledWith('robot-1', { force: true });
+  });
+
+  it('does not refresh status after failed or ignored commands', async () => {
+    jest.useFakeTimers();
+    const mqtt = { publish: jest.fn(), subscribe: jest.fn(() => jest.fn()) } as unknown as MqttBridgeClient;
+    const failedBridge = new Roborock(cfg, mqtt);
+    const failedClient = {
+      app_start: jest.fn<() => Promise<void>>().mockRejectedValue(new Error('command failed')),
+      getStatus: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      isInited: jest.fn(() => true),
+    };
+    const failedInstance = failedBridge as unknown as {
+      client: typeof failedClient;
+      executeCommand(deviceId: string, command: { command: 'start' }): Promise<void>;
+    };
+    failedInstance.client = failedClient;
+    await failedInstance.executeCommand('robot-1', { command: 'start' });
+
+    const ignoredBridge = new Roborock(cfg, mqtt);
+    const ignoredClient = {
+      app_start: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      getStatus: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      isInited: jest.fn(() => false),
+    };
+    const ignoredInstance = ignoredBridge as unknown as {
+      client: typeof ignoredClient;
+      executeCommand(deviceId: string, command: { command: 'start' }): Promise<void>;
+    };
+    ignoredInstance.client = ignoredClient;
+    await ignoredInstance.executeCommand('robot-1', { command: 'start' });
+
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect(failedClient.getStatus).not.toHaveBeenCalled();
+    expect(ignoredClient.app_start).not.toHaveBeenCalled();
+    expect(ignoredClient.getStatus).not.toHaveBeenCalled();
+  });
+
+  it('cancels pending status refreshes when destroyed', async () => {
+    jest.useFakeTimers();
+    const mqtt = { publish: jest.fn(), subscribe: jest.fn(() => jest.fn()) } as unknown as MqttBridgeClient;
+    const bridge = new Roborock(cfg, mqtt);
+    const client = {
+      app_start: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      getStatus: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      isInited: jest.fn(() => true),
+      stopService: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    };
+    const instance = bridge as unknown as {
+      client: typeof client;
+      executeCommand(deviceId: string, command: { command: 'start' }): Promise<void>;
+    };
+    instance.client = client;
+    await instance.executeCommand('robot-1', { command: 'start' });
+
+    bridge.destroy();
+    await jest.advanceTimersByTimeAsync(2_000);
+
+    expect(client.stopService).toHaveBeenCalled();
+    expect(client.getStatus).not.toHaveBeenCalled();
   });
 
   it('stores the latest map and retains its path for later MQTT subscribers', async () => {

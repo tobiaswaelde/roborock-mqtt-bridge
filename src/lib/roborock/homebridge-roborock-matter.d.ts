@@ -31,6 +31,7 @@ declare module 'homebridge-roborock-matter/roborockLib/roborockAPI' {
     app_start(duid: string, options?: Record<string, unknown>): Promise<void>;
     app_stop(duid: string, options?: Record<string, unknown>): Promise<void>;
     find_me(duid: string, options?: Record<string, unknown>): Promise<void>;
+    getStatus(duid: string, options?: { force?: boolean; preferCloud?: boolean }): Promise<void>;
     isInited(): boolean;
     sendTwoFactorEmail(): Promise<{ ok: boolean }>;
     setDeviceNotify(callback: (id: string, state: unknown) => void): void;

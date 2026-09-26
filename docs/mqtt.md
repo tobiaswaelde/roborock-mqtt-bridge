@@ -33,3 +33,7 @@ Publish it to `<topic>/devices/<device-id>/command/json`. Supported actions are 
 Set suction power by publishing one of `silent`, `balanced`, `turbo`, `max`, `max_plus`, `off`, or `custom` as a plain payload to `<topic>/devices/<device-id>/command/suction_power`. Available levels depend on the robot model.
 
 All command publications must be non-retained.
+
+After a command is accepted, the bridge requests a forced device-status refresh two seconds later. Commands received
+for the same device during that delay are combined into one refresh after the latest command. Failed or ignored
+commands do not trigger a refresh; the regular Roborock status polling continues unchanged.
