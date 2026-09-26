@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+### Patch Changes
+
+- [`108a9d2`](https://github.com/tobiaswaelde/roborock-mqtt-bridge/commit/108a9d2dd68ce736bba3ff6cff5867fc57996a0f) Thanks [@tobiaswaelde](https://github.com/tobiaswaelde)! - Update all runtime and development dependencies, including NestJS 12, and migrate the test setup to ESM.
+
 ## 0.1.0
 
 ### Minor Changes
