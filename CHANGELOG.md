@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+### Patch Changes
+
+- [`0691898`](https://github.com/tobiaswaelde/roborock-mqtt-bridge/commit/06918987d06a09a5fd57a3622c7f99a7850d4c5c) Thanks [@tobiaswaelde](https://github.com/tobiaswaelde)! - Refresh a robot's published status two seconds after a successful MQTT command.
+
 ## 0.1.1
 
 ### Patch Changes
