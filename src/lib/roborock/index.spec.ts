@@ -21,6 +21,51 @@ describe('Roborock', () => {
     updateInterval: 30_000,
   };
 
+  it('continues regional discovery after a cloud host DNS failure', async () => {
+    const mqtt = { publish: jest.fn(), subscribe: jest.fn(() => jest.fn()) } as unknown as MqttBridgeClient;
+    const bridge = new Roborock(cfg, mqtt);
+    const post = jest
+      .fn<(...args: unknown[]) => Promise<unknown>>()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('getaddrinfo EAI_AGAIN euiot.roborock.com'), { code: 'EAI_AGAIN' }),
+      )
+      .mockResolvedValueOnce({
+        data: { data: { country: 'US', countrycode: 'US', url: 'https://usiot.roborock.com/' } },
+      });
+    const instance = bridge as unknown as {
+      api: { post: typeof post };
+      getBaseUrl(): Promise<string | undefined>;
+    };
+    instance.api.post = post;
+
+    await expect(instance.getBaseUrl()).resolves.toBe('usiot.roborock.com');
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[0]?.[0]).toBe('https://euiot.roborock.com/api/v1/getUrlByEmail?email=robot%40example.com');
+    expect(post.mock.calls[1]?.[0]).toBe('https://usiot.roborock.com/api/v1/getUrlByEmail?email=robot%40example.com');
+  });
+
+  it('retries connecting after regional discovery remains unavailable', async () => {
+    jest.useFakeTimers();
+    const mqtt = { publish: jest.fn(), subscribe: jest.fn(() => jest.fn()) } as unknown as MqttBridgeClient;
+    const bridge = new Roborock(cfg, mqtt);
+    const instance = bridge as unknown as {
+      connect(): Promise<void>;
+      getBaseUrl: jest.Mock<() => Promise<string | undefined>>;
+    };
+    instance.getBaseUrl = jest.fn<() => Promise<string | undefined>>().mockResolvedValue(undefined);
+
+    await instance.connect();
+    expect(instance.getBaseUrl).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(9_999);
+    expect(instance.getBaseUrl).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(1);
+    expect(instance.getBaseUrl).toHaveBeenCalledTimes(2);
+
+    bridge.destroy();
+  });
+
   it('stores and loads only the authentication session with owner-only permissions', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'mqtt-bridges-roborock-'));
     const authFile = path.join(directory, 'auth.json');

@@ -42,6 +42,7 @@ interface RoborockMapClient {
 
 /** Bridges one Roborock account's state, authentication, and supported commands to MQTT. */
 export class Roborock extends HttpMqttBridge<RoborockConfig> {
+  private static readonly connectionRetryDelay = 10_000;
   private static readonly commandStatusRefreshDelay = 2_000;
   private static readonly logLevelPriority: Record<RoborockLogLevel, number> = {
     debug: 3,
@@ -51,6 +52,7 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   };
 
   private client?: RoborockClient;
+  private connectionRetryTimer?: NodeJS.Timeout;
   private destroyed = false;
   private readonly mapHashes = new Map<string, string>();
   private readonly mapRequests = new Set<string>();
@@ -75,6 +77,8 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
 
     this.destroyed = true;
     this.cancelRequest('region');
+    if (this.connectionRetryTimer) clearTimeout(this.connectionRetryTimer);
+    this.connectionRetryTimer = undefined;
     for (const timer of this.statusRefreshTimers.values()) clearTimeout(timer);
     this.statusRefreshTimers.clear();
     const client = this.client;
@@ -87,7 +91,11 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
   /** Discovers the cloud endpoint, restores a saved session, and starts the Roborock client. */
   private async connect() {
     const baseURL = await this.getBaseUrl();
-    if (!baseURL || this.destroyed) return;
+    if (!baseURL) {
+      this.scheduleConnectionRetry();
+      return;
+    }
+    if (this.destroyed) return;
 
     const session = await this.loadAuthentication();
     if (this.destroyed) return;
@@ -125,23 +133,39 @@ export class Roborock extends HttpMqttBridge<RoborockConfig> {
     if (this.cfg.baseUrl) return this.normalizeHost(this.cfg.baseUrl);
 
     const controller = this.startRequest('region');
+    let lastError: unknown;
     try {
       for (const host of REGION_CLOUD_HOSTS[this.cfg.region]) {
-        const response = await this.api.post<RegionResponse>(
-          `https://${host}/api/v1/getUrlByEmail?email=${encodeURIComponent(this.cfg.email)}`,
-          undefined,
-          { signal: controller.signal },
-        );
-        const region = response.data.data;
-        if (region?.url && region.country && region.countrycode) return this.normalizeHost(region.url);
+        try {
+          const response = await this.api.post<RegionResponse>(
+            `https://${host}/api/v1/getUrlByEmail?email=${encodeURIComponent(this.cfg.email)}`,
+            undefined,
+            { signal: controller.signal },
+          );
+          const region = response.data.data;
+          if (region?.url && region.country && region.countrycode) return this.normalizeHost(region.url);
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          lastError = error;
+        }
       }
-      throw new Error(`No Roborock region was found for ${this.cfg.email}.`);
-    } catch (error) {
+      const error = lastError ?? new Error(`No Roborock region was found for ${this.cfg.email}.`);
       this.logError('Failed to discover the Roborock account region.', error, controller.signal);
       return;
     } finally {
       this.finishRequest('region', controller);
     }
+  }
+
+  /** Retries cloud discovery after temporary DNS or network failures. */
+  private scheduleConnectionRetry() {
+    if (this.destroyed || this.connectionRetryTimer) return;
+
+    this.connectionRetryTimer = setTimeout(() => {
+      this.connectionRetryTimer = undefined;
+      if (!this.destroyed) void this.connect();
+    }, Roborock.connectionRetryDelay);
+    this.connectionRetryTimer.unref();
   }
 
   /** Removes the protocol and trailing slash expected by the wrapped client. */
