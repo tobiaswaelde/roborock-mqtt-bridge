@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3
+
+### Patch Changes
+
+- [`8ec9068`](https://github.com/tobiaswaelde/roborock-mqtt-bridge/commit/8ec906809695c3fc19a4a8224773831b00782585) Thanks [@tobiaswaelde](https://github.com/tobiaswaelde)! - Continue Roborock region discovery after individual cloud-host failures and retry startup after temporary network outages.
+
 ## 0.1.2
 
 ### Patch Changes
