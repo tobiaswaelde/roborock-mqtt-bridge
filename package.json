@@ -19,7 +19,7 @@
     "changeset": "changeset"
   },
   "dependencies": {
-    "@nestjs/common": "^12.1.0",
+    "@nestjs/common": "^12.1.2",
     "@nestjs/core": "^12.1.0",
     "@nestjs/platform-express": "^12.1.0",
     "axios": "^1.20.0",
